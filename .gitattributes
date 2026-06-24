@@ -1,2 +1,4 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Keep router shell and CGI scripts in Unix LF format.
+* text=auto eol=lf
+*.sh text eol=lf
+www/cgi-bin/* text eol=lf
