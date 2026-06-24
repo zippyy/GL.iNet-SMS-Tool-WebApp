@@ -1,12 +1,12 @@
 #!/bin/sh
 # GL.iNet SMS Tool Web App CGI endpoint.
-# Reads GL.iNet/smstools spool files and sends through GL.iNet's native sendsms utility.
+# This GL.iNet sendsms wrapper reads the actual SMS text from stdin.
 
 umask 077
 MAX_BODY=1000
-CONFIG_NAME="glinet_sms_webapp"
-DEFAULT_SPOOL="/etc/spool/sms"
-SEND_LOG="/tmp/glinet-sms-webapp-send.log"
+CONFIG_NAME='glinet_sms_webapp'
+DEFAULT_SPOOL='/etc/spool/sms'
+SEND_LOG='/tmp/glinet-sms-webapp-send.log'
 
 json_header() {
     printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
@@ -25,9 +25,7 @@ json_escape() {
          }'
 }
 
-json_string() {
-    printf '%s' "$1" | json_escape
-}
+json_string() { printf '%s' "$1" | json_escape; }
 
 spool_base() {
     base="$(uci -q get "$CONFIG_NAME.settings.spool_base" 2>/dev/null || true)"
@@ -36,24 +34,17 @@ spool_base() {
 }
 
 field() {
-    f="$1"
-    name="$2"
-    awk -v name="$name" 'index($0, name ":") == 1 { sub("^[^:]*:[[:space:]]*", ""); print; exit }' "$f" 2>/dev/null
+    awk -v name="$2" 'index($0, name ":") == 1 { sub("^[^:]*:[[:space:]]*", ""); print; exit }' "$1" 2>/dev/null
 }
 
-body() {
-    sed '1,/^$/d' "$1" 2>/dev/null
-}
+message_body() { sed '1,/^$/d' "$1" 2>/dev/null; }
 
 list_messages() {
-    requested_box="$1"
-    case "$requested_box" in
-        incoming|storage|sent|failed) box="$requested_box" ;;
-        *) box="incoming" ;;
+    case "$1" in
+        incoming|storage|sent|failed) box="$1" ;;
+        *) box='incoming' ;;
     esac
-
-    base="$(spool_base)"
-    directory="$base/$box"
+    directory="$(spool_base)/$box"
 
     json_header
     [ -d "$directory" ] || { printf '{"ok":true,"box":"%s","messages":[]}\n' "$box"; return; }
@@ -63,24 +54,18 @@ list_messages() {
     for name in $(ls -1t "$directory" 2>/dev/null); do
         f="$directory/$name"
         [ -f "$f" ] || continue
-
         from="$(field "$f" From)"
         to="$(field "$f" To)"
         received="$(field "$f" Received)"
         sent="$(field "$f" Sent)"
         modem="$(field "$f" Modem)"
         [ -n "$modem" ] || modem="$(field "$f" Subject)"
-        text="$(body "$f")"
-
+        text="$(message_body "$f")"
         [ "$first" = 1 ] || printf ','
         first=0
         printf '{"file":"%s","from":"%s","to":"%s","received":"%s","sent":"%s","modem":"%s","body":"%s"}' \
-            "$(json_string "$name")" \
-            "$(json_string "$from")" \
-            "$(json_string "$to")" \
-            "$(json_string "$received")" \
-            "$(json_string "$sent")" \
-            "$(json_string "$modem")" \
+            "$(json_string "$name")" "$(json_string "$from")" "$(json_string "$to")" \
+            "$(json_string "$received")" "$(json_string "$sent")" "$(json_string "$modem")" \
             "$(json_string "$text")"
     done
     printf ']}\n'
@@ -88,7 +73,7 @@ list_messages() {
 
 url_decode() {
     input="$1"
-    output=""
+    output=''
     while [ -n "$input" ]; do
         case "$input" in
             +*) output="$output "; input=${input#?} ;;
@@ -121,10 +106,12 @@ form_value() {
 }
 
 send_sms() {
-    [ "${REQUEST_METHOD:-GET}" = "POST" ] || { json_header; printf '{"ok":false,"error":"POST required"}\n'; return; }
+    [ "${REQUEST_METHOD:-GET}" = 'POST' ] || { json_header; printf '{"ok":false,"error":"POST required"}\n'; return; }
+
     length="${CONTENT_LENGTH:-0}"
     case "$length" in ''|*[!0-9]*) length=0 ;; esac
     POST_DATA="$(dd bs=1 count="$length" 2>/dev/null)"
+
     to="$(form_value to | tr -cd '0-9+')"
     text="$(form_value text | head -c "$MAX_BODY")"
 
@@ -133,22 +120,22 @@ send_sms() {
     [ -n "$text" ] || { printf '{"ok":false,"error":"Message text is required"}\n'; return; }
 
     sender="$(command -v sendsms 2>/dev/null || true)"
-    [ -n "$sender" ] || [ ! -x /usr/bin/sendsms ] || sender='/usr/bin/sendsms'
-    [ -n "$sender" ] || { printf '{"ok":false,"error":"GL.iNet sendsms utility was not found on this router"}\n'; return; }
+    [ -n "$sender" ] || sender='/usr/bin/sendsms'
+    [ -x "$sender" ] || { printf '{"ok":false,"error":"GL.iNet sendsms utility was not found"}\n'; return; }
 
-    result="$("$sender" "$to" "$text" international 2>&1)"
+    result="$(printf '%s\n' "$text" | "$sender" "$to" "$text" international 2>&1)"
     status=$?
     printf '[%s] to=%s status=%s output=%s\n' "$(date '+%F %T')" "$to" "$status" "$result" >> "$SEND_LOG"
+
     if [ "$status" -eq 0 ]; then
-        printf '{"ok":true,"sent":true,"message":"SMS sent through GL.iNet sendsms"}\n'
+        printf '{"ok":true,"queued":true,"message":"SMS queued through GL.iNet sendsms"}\n'
     else
         printf '{"ok":false,"error":"sendsms failed: %s"}\n' "$(json_string "$result")"
     fi
 }
 
 query_value() {
-    key="$1"
-    printf '%s' "${QUERY_STRING:-}" | tr '&' '\n' | sed -n "s/^$key=//p" | head -n 1
+    printf '%s' "${QUERY_STRING:-}" | tr '&' '\n' | sed -n "s/^$1=//p" | head -n 1
 }
 
 action="$(query_value action)"
