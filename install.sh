@@ -25,7 +25,6 @@ fetch() {
     url="$1"
     output="$2"
     mkdir -p "$(dirname "$output")"
-
     if has curl; then
         curl -4 -fsSL "$url" -o "$output" 2>/dev/null || curl -fsSL "$url" -o "$output"
     elif has wget; then
@@ -33,7 +32,6 @@ fetch() {
     else
         fail 'curl or wget is required'
     fi
-
     [ -s "$output" ] || fail "download failed: $url"
 }
 
@@ -41,7 +39,6 @@ copy_to_router() {
     source_file="$1"
     target_file="$2"
     mode="$3"
-
     [ -f "$source_file" ] || fail "missing source file: $source_file"
     mkdir -p "$(dirname "$target_file")"
     cp -f "$source_file" "$target_file"
@@ -70,36 +67,38 @@ download_app() {
     fetch "$RAW_BASE/www/cgi-bin/glinet-sms-webapp" "$TMP_DIR/glinet-sms-webapp"
 }
 
+restart_web_servers() {
+    [ -x /etc/init.d/nginx ] && /etc/init.d/nginx restart >/dev/null 2>&1 || true
+    [ -x /etc/init.d/uhttpd ] && /etc/init.d/uhttpd restart >/dev/null 2>&1 || true
+}
+
 do_install() {
     log "installing from $REPO@$REF"
     write_config
-
     base="$(current_spool_base)"
     mkdir -p "$base/incoming" "$base/storage" "$base/sent" "$base/failed" "$base/outgoing"
-
     download_app
 
     rm -rf "$WEB_DIR"
     mkdir -p "$WEB_DIR" "$CGI_DIR"
+    chmod 0755 /www "$WEB_DIR" "$CGI_DIR" 2>/dev/null || true
     copy_to_router "$TMP_DIR/index.html" "$WEB_DIR/index.html" 0644
+    # GL.iNet nginx builds may only treat index.htm as a directory index.
+    copy_to_router "$TMP_DIR/index.html" "$WEB_DIR/index.htm" 0644
     copy_to_router "$TMP_DIR/app.css" "$WEB_DIR/app.css" 0644
     copy_to_router "$TMP_DIR/app.js" "$WEB_DIR/app.js" 0644
     copy_to_router "$TMP_DIR/glinet-sms-webapp" "$CGI_FILE" 0755
-
-    if [ -x /etc/init.d/uhttpd ]; then
-        /etc/init.d/uhttpd enable >/dev/null 2>&1 || true
-        /etc/init.d/uhttpd restart >/dev/null 2>&1 || true
-    fi
+    restart_web_servers
 
     lan_ip="$(uci -q get network.lan.ipaddr 2>/dev/null || true)"
     [ -n "$lan_ip" ] || lan_ip='ROUTER-IP'
-    log "installed: http://$lan_ip/sms/"
+    log "installed: http://$lan_ip/sms/index.htm"
 }
 
 remove_app() {
     rm -rf "$WEB_DIR"
     rm -f "$CGI_FILE"
-    [ -x /etc/init.d/uhttpd ] && /etc/init.d/uhttpd restart >/dev/null 2>&1 || true
+    restart_web_servers
     log 'removed application files; SMS data was not deleted'
 }
 
