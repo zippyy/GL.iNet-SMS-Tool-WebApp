@@ -1,0 +1,2 @@
+config sms 'settings'
+        option spool_base '/etc/spool/sms'

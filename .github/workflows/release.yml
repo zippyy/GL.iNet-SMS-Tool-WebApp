@@ -1,0 +1,21 @@
+name: Release source ZIP
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  source-zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create source archive
+        run: |
+          git archive --format=zip --output GL.iNet-SMS-Tool-WebApp.zip "$GITHUB_SHA"
+      - name: Publish release archive
+        uses: softprops/action-gh-release@v2
+        with:
+          files: GL.iNet-SMS-Tool-WebApp.zip

@@ -1,0 +1,197 @@
+#!/bin/sh
+# GL.iNet SMS Tool Web App CGI endpoint.
+# Reads GL.iNet/smstools spool files and queues outbound SMS files for smsd.
+
+umask 077
+MAX_BODY=1000
+CONFIG_NAME="glinet_sms_webapp"
+DEFAULT_SPOOL="/etc/spool/sms"
+
+json_header() {
+    printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
+}
+
+json_escape() {
+    # Encode a UTF-8 stream for safe insertion inside a JSON string.
+    # Newlines become literal \\n sequences; quotes and backslashes are escaped.
+    awk 'BEGIN { first = 1 }
+         {
+           if (!first) printf "\\n"
+           first = 0
+           gsub(/\\/, "\\\\")
+           gsub(/"/, "\\\"")
+           gsub(/\t/, "\\t")
+           gsub(/\r/, "")
+           printf "%s", $0
+         }'
+}
+
+json_string() {
+    printf '%s' "$1" | json_escape
+}
+
+spool_base() {
+    base="$(uci -q get "$CONFIG_NAME.settings.spool_base" 2>/dev/null || true)"
+    [ -n "$base" ] || base="$DEFAULT_SPOOL"
+    printf '%s' "$base"
+}
+
+field() {
+    f="$1"
+    name="$2"
+    awk -v name="$name" 'index($0, name ":") == 1 { sub("^[^:]*:[[:space:]]*", ""); print; exit }' "$f" 2>/dev/null
+}
+
+body() {
+    sed '1,/^$/d' "$1" 2>/dev/null
+}
+
+list_messages() {
+    requested_box="$1"
+    case "$requested_box" in
+        incoming|storage|sent|failed) box="$requested_box" ;;
+        *) box="incoming" ;;
+    esac
+
+    base="$(spool_base)"
+    directory="$base/$box"
+
+    json_header
+    [ -d "$directory" ] || { printf '{"ok":true,"box":"%s","messages":[]}\n' "$box"; return; }
+
+    printf '{"ok":true,"box":"%s","messages":[' "$box"
+    first=1
+
+    # smsd message filenames are generated without spaces. ls -1t provides a
+    # useful newest-first UI while -f skips slot/bus directories.
+    for name in $(ls -1t "$directory" 2>/dev/null); do
+        f="$directory/$name"
+        [ -f "$f" ] || continue
+
+        from="$(field "$f" From)"
+        to="$(field "$f" To)"
+        received="$(field "$f" Received)"
+        sent="$(field "$f" Sent)"
+        modem="$(field "$f" Modem)"
+        [ -n "$modem" ] || modem="$(field "$f" Subject)"
+        text="$(body "$f")"
+
+        [ "$first" = 1 ] || printf ','
+        first=0
+        printf '{"file":"%s","from":"%s","to":"%s","received":"%s","sent":"%s","modem":"%s","body":"%s"}' \
+            "$(json_string "$name")" \
+            "$(json_string "$from")" \
+            "$(json_string "$to")" \
+            "$(json_string "$received")" \
+            "$(json_string "$sent")" \
+            "$(json_string "$modem")" \
+            "$(json_string "$text")"
+    done
+
+    printf ']}\n'
+}
+
+url_decode() {
+    # Decode application/x-www-form-urlencoded without relying on printf \\xHH
+    # support, which differs across BusyBox builds.
+    input="$1"
+    output=""
+
+    while [ -n "$input" ]; do
+        case "$input" in
+            +*)
+                output="$output "
+                input=${input#?}
+                ;;
+            %??*)
+                hex="$(printf '%s' "$input" | cut -c 2-3)"
+                case "$hex" in
+                    [0-9A-Fa-f][0-9A-Fa-f])
+                        decimal="$(printf '%d' "0x$hex" 2>/dev/null || true)"
+                        octal="$(printf '%03o' "$decimal")"
+                        output="$output$(printf "\\$octal")"
+                        input="$(printf '%s' "$input" | cut -c 4-)"
+                        ;;
+                    *)
+                        output="$output%"
+                        input=${input#?}
+                        ;;
+                esac
+                ;;
+            *)
+                character="$(printf '%s' "$input" | cut -c 1)"
+                output="$output$character"
+                input=${input#?}
+                ;;
+        esac
+    done
+
+    printf '%s' "$output"
+}
+
+form_value() {
+    wanted="$1"
+    raw="$(printf '%s' "$POST_DATA" | tr '&' '\n' | sed -n "s/^$wanted=//p" | head -n 1)"
+    url_decode "$raw"
+}
+
+queue_sms() {
+    [ "${REQUEST_METHOD:-GET}" = "POST" ] || {
+        json_header
+        printf '{"ok":false,"error":"POST required"}\n'
+        return
+    }
+
+    length="${CONTENT_LENGTH:-0}"
+    case "$length" in ''|*[!0-9]*) length=0 ;; esac
+    POST_DATA="$(dd bs=1 count="$length" 2>/dev/null)"
+
+    to="$(form_value to | tr -cd '0-9+')"
+    modem="$(form_value modem | tr -cd 'A-Za-z0-9_.-')"
+    text="$(form_value text | head -c "$MAX_BODY")"
+
+    json_header
+    [ -n "$to" ] || { printf '{"ok":false,"error":"Destination number is required"}\n'; return; }
+    [ -n "$text" ] || { printf '{"ok":false,"error":"Message text is required"}\n'; return; }
+
+    base="$(spool_base)"
+    outgoing="$base/outgoing"
+    mkdir -p "$outgoing" 2>/dev/null || {
+        printf '{"ok":false,"error":"Could not create the outgoing SMS spool"}\n'
+        return
+    }
+
+    stamp="$(date +%s)"
+    tmp="$outgoing/.glinet-sms-webapp.$$.tmp"
+    queued="$outgoing/glinet-sms-webapp.$stamp.$$"
+
+    {
+        printf 'To: %s\n' "$to"
+        [ -n "$modem" ] && printf 'Modem: %s\n' "$modem"
+        printf '\n%s\n' "$text"
+    } > "$tmp" 2>/dev/null || {
+        rm -f "$tmp"
+        printf '{"ok":false,"error":"Could not write the outgoing SMS file"}\n'
+        return
+    }
+
+    chmod 0600 "$tmp" 2>/dev/null || true
+    mv "$tmp" "$queued" 2>/dev/null || {
+        rm -f "$tmp"
+        printf '{"ok":false,"error":"Could not queue the SMS"}\n'
+        return
+    }
+
+    printf '{"ok":true,"queued":"%s"}\n' "$(json_string "$(basename "$queued")")"
+}
+
+query_value() {
+    key="$1"
+    printf '%s' "${QUERY_STRING:-}" | tr '&' '\n' | sed -n "s/^$key=//p" | head -n 1
+}
+
+action="$(query_value action)"
+case "$action" in
+    send) queue_sms ;;
+    list|*) list_messages "$(query_value box)" ;;
+esac
