@@ -1,19 +1,17 @@
-name: Build IPK
+name: Build and Release IPK
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
-    paths:
-      - 'package/**'
-      - 'scripts/build-ipk.sh'
-      - '.github/workflows/build-ipk.yml'
 
 permissions:
   contents: write
+
+concurrency:
+  group: build-ipk-main
+  cancel-in-progress: false
 
 jobs:
   build-ipk:
@@ -33,6 +31,21 @@ jobs:
           ls -lh dist/*.ipk
           ar t dist/*.ipk
 
+      - name: Set release metadata
+        id: release
+        shell: bash
+        run: |
+          version="$(sed -n 's/^PKG_VERSION:=//p' package/Makefile | head -n 1)"
+          release="$(sed -n 's/^PKG_RELEASE:=//p' package/Makefile | head -n 1)"
+          test -n "$version"
+          test -n "$release"
+
+          tag="v${version}-build.${GITHUB_RUN_NUMBER}"
+          title="GL.iNet SMS Tool ${version}-${release} — build ${GITHUB_RUN_NUMBER}"
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
       - name: Upload IPK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -41,11 +54,14 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Publish tagged release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.release.outputs.title }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/*.ipk \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+          gh release create "$RELEASE_TAG" dist/*.ipk \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TITLE" \
+            --notes "Automated IPK build from commit $GITHUB_SHA." \
+            --prerelease
