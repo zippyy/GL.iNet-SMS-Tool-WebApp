@@ -28,7 +28,6 @@
       messages.innerHTML = '<p class="empty">No messages in this folder.</p>';
       return;
     }
-
     messages.innerHTML = list.map(item => {
       const who = item.from || item.to || 'Unknown sender';
       const time = item.received || item.sent || '';
@@ -58,7 +57,6 @@
 
   text.addEventListener('input', () => { count.textContent = text.value.length; });
   refresh.addEventListener('click', load);
-
   document.querySelectorAll('[data-box]').forEach(tab => {
     tab.addEventListener('click', () => {
       box = tab.dataset.box;
@@ -70,7 +68,7 @@
   form.addEventListener('submit', async event => {
     event.preventDefault();
     status.className = '';
-    status.textContent = 'Queueing message…';
+    status.textContent = 'Sending message…';
     send.disabled = true;
     try {
       const data = await request(`${api}?action=send`, {
@@ -78,7 +76,7 @@
         headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
         body: new URLSearchParams(new FormData(form)).toString()
       });
-      status.textContent = `Queued as ${data.queued}.`;
+      status.textContent = data.message || 'SMS sent.';
       form.reset();
       count.textContent = '0';
       setTimeout(load, 350);
