@@ -1,0 +1,51 @@
+name: Build IPK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+    paths:
+      - 'package/**'
+      - 'scripts/build-ipk.sh'
+      - '.github/workflows/build-ipk.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-ipk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build IPK
+        run: |
+          chmod +x scripts/build-ipk.sh
+          scripts/build-ipk.sh
+
+      - name: Inspect package
+        run: |
+          ls -lh dist/*.ipk
+          ar t dist/*.ipk
+
+      - name: Upload IPK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: glinet-sms-tool-webapp-ipk
+          path: dist/*.ipk
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.ipk \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
