@@ -11,7 +11,6 @@ define Package/glinet-sms-tool-webapp
   SECTION:=utils
   CATEGORY:=Utilities
   TITLE:=GL.iNet SMS Tool Web App
-  DEPENDS:=+uhttpd
 endef
 
 define Package/glinet-sms-tool-webapp/description
@@ -25,6 +24,7 @@ endef
 define Package/glinet-sms-tool-webapp/install
 	$(INSTALL_DIR) $(1)/www/sms
 	$(INSTALL_DATA) ./files/www/sms/index.html $(1)/www/sms/index.html
+	$(INSTALL_DATA) ./files/www/sms/index.html $(1)/www/sms/index.htm
 	$(INSTALL_DATA) ./files/www/sms/app.css $(1)/www/sms/app.css
 	$(INSTALL_DATA) ./files/www/sms/app.js $(1)/www/sms/app.js
 	$(INSTALL_DIR) $(1)/www/cgi-bin
