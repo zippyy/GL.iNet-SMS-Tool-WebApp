@@ -13,7 +13,7 @@
       <div>
         <p class="eyebrow">CELLULAR ROUTER</p>
         <h1>GL.iNet SMS Tool</h1>
-        <p class="subhead">Read received SMS and queue messages through the router’s built-in smsd spool.</p>
+        <p class="subhead">Read received SMS and send messages through GL.iNet’s native <code>sendsms</code> utility.</p>
       </div>
       <button class="secondary" id="refresh" type="button">Refresh</button>
     </header>
@@ -24,31 +24,21 @@
           <p class="eyebrow">OUTBOUND</p>
           <h2 id="compose-title">Send message</h2>
         </div>
-        <span class="hint">Messages are queued locally for <code>smsd</code>.</span>
+        <span class="hint">Uses the router’s active cellular modem.</span>
       </div>
 
       <form id="send-form" novalidate>
-        <div class="form-grid">
-          <label>
-            <span>Destination number</span>
-            <input id="to" name="to" inputmode="tel" autocomplete="tel" placeholder="15551234567" required>
-          </label>
-          <label>
-            <span>SIM / modem</span>
-            <select id="modem" name="modem">
-              <option value="">Automatic / active modem</option>
-              <option value="GMS1">GMS1 · SIM 1</option>
-              <option value="GMS2">GMS2 · SIM 2</option>
-            </select>
-          </label>
-        </div>
+        <label>
+          <span>Destination number</span>
+          <input id="to" name="to" inputmode="tel" autocomplete="tel" placeholder="15551234567" required>
+        </label>
         <label>
           <span>Message</span>
           <textarea id="text" name="text" rows="5" maxlength="1000" placeholder="Type an SMS message…" required></textarea>
           <small><span id="char-count">0</span>/1000 characters</small>
         </label>
         <div class="form-actions">
-          <button id="send" type="submit">Queue SMS</button>
+          <button id="send" type="submit">Send SMS</button>
           <output id="send-status" role="status" aria-live="polite"></output>
         </div>
       </form>
